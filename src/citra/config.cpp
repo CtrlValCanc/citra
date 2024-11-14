@@ -126,6 +126,7 @@ void Config::ReadValues() {
     Settings::values.current_input_profile.udp_input_port =
         static_cast<u16>(sdl2_config->GetInteger("Controls", "udp_input_port",
                                                  InputCommon::CemuhookUDP::DEFAULT_PORT));
+    ReadSetting("Controls", Settings::values.use_artic_base_controller);
 
     // Core
     ReadSetting("Core", Settings::values.use_cpu_jit);
@@ -147,6 +148,7 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.use_vsync_new);
     ReadSetting("Renderer", Settings::values.texture_filter);
     ReadSetting("Renderer", Settings::values.texture_sampling);
+    ReadSetting("Renderer", Settings::values.delay_game_render_thread_us);
 
     ReadSetting("Renderer", Settings::values.mono_render_option);
     ReadSetting("Renderer", Settings::values.render_3d);
@@ -230,6 +232,7 @@ void Config::ReadValues() {
     ReadSetting("System", Settings::values.init_ticks_override);
     ReadSetting("System", Settings::values.plugin_loader_enabled);
     ReadSetting("System", Settings::values.allow_plugin_loader);
+    ReadSetting("System", Settings::values.steps_per_hour);
 
     {
         constexpr const char* default_init_time_offset = "0 00:00:00";
@@ -306,12 +309,14 @@ void Config::ReadValues() {
 
     // Miscellaneous
     ReadSetting("Miscellaneous", Settings::values.log_filter);
+    ReadSetting("Miscellaneous", Settings::values.log_regex_filter);
 
     // Apply the log_filter setting as the logger has already been initialized
     // and doesn't pick up the filter on its own.
     Common::Log::Filter filter;
     filter.ParseFilterString(Settings::values.log_filter.GetValue());
     Common::Log::SetGlobalFilter(filter);
+    Common::Log::SetRegexFilter(Settings::values.log_regex_filter.GetValue());
 
     // Debugging
     Settings::values.record_frame_times =
@@ -319,6 +324,7 @@ void Config::ReadValues() {
     ReadSetting("Debugging", Settings::values.renderer_debug);
     ReadSetting("Debugging", Settings::values.use_gdbstub);
     ReadSetting("Debugging", Settings::values.gdbstub_port);
+    ReadSetting("Debugging", Settings::values.instant_debug_log);
 
     for (const auto& service_module : Service::service_module_map) {
         bool use_lle = sdl2_config->GetBoolean("Debugging", "LLE\\" + service_module.name, false);
@@ -326,8 +332,6 @@ void Config::ReadValues() {
     }
 
     // Web Service
-    NetSettings::values.enable_telemetry =
-        sdl2_config->GetBoolean("WebService", "enable_telemetry", false);
     NetSettings::values.web_api_url =
         sdl2_config->GetString("WebService", "web_api_url", "https://api.citra-emu.org");
     NetSettings::values.citra_username = sdl2_config->GetString("WebService", "citra_username", "");

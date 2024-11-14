@@ -47,7 +47,6 @@
 #ifdef ENABLE_SCRIPTING
 #include "core/rpc/server.h"
 #endif
-#include "core/telemetry_session.h"
 #include "network/network.h"
 #include "video_core/custom_textures/custom_tex_manager.h"
 #include "video_core/gpu.h"
@@ -257,10 +256,26 @@ System::ResultStatus System::SingleStep() {
 System::ResultStatus System::Load(Frontend::EmuWindow& emu_window, const std::string& filepath,
                                   Frontend::EmuWindow* secondary_window) {
     FileUtil::SetCurrentRomPath(filepath);
-    app_loader = Loader::GetLoader(filepath);
+    if (early_app_loader) {
+        app_loader = std::move(early_app_loader);
+    } else {
+        app_loader = Loader::GetLoader(filepath);
+    }
     if (!app_loader) {
         LOG_CRITICAL(Core, "Failed to obtain loader for {}!", filepath);
         return ResultStatus::ErrorGetLoader;
+    }
+
+    if (restore_plugin_context.has_value() && restore_plugin_context->is_enabled &&
+        restore_plugin_context->use_user_load_parameters) {
+        u64_le program_id = 0;
+        app_loader->ReadProgramId(program_id);
+        if (restore_plugin_context->user_load_parameters.low_title_Id ==
+                static_cast<u32_le>(program_id) &&
+            restore_plugin_context->user_load_parameters.plugin_memory_strategy ==
+                Service::PLGLDR::PLG_LDR::PluginMemoryStrategy::PLG_STRATEGY_MODE3) {
+            app_loader->SetKernelMemoryModeOverride(Kernel::MemoryMode::Dev2);
+        }
     }
 
     auto memory_mode = app_loader->LoadKernelMemoryMode();
@@ -275,6 +290,8 @@ System::ResultStatus System::Load(Frontend::EmuWindow& emu_window, const std::st
             return ResultStatus::ErrorLoader_ErrorInvalidFormat;
         case Loader::ResultStatus::ErrorGbaTitle:
             return ResultStatus::ErrorLoader_ErrorGbaTitle;
+        case Loader::ResultStatus::ErrorArtic:
+            return ResultStatus::ErrorArticDisconnected;
         default:
             return ResultStatus::ErrorSystemMode;
         }
@@ -310,7 +327,6 @@ System::ResultStatus System::Load(Frontend::EmuWindow& emu_window, const std::st
         restore_plugin_context.reset();
     }
 
-    telemetry_session->AddInitialInfo(*app_loader);
     std::shared_ptr<Kernel::Process> process;
     const Loader::ResultStatus load_result{app_loader->Load(process)};
     if (Loader::ResultStatus::Success != load_result) {
@@ -324,6 +340,8 @@ System::ResultStatus System::Load(Frontend::EmuWindow& emu_window, const std::st
             return ResultStatus::ErrorLoader_ErrorInvalidFormat;
         case Loader::ResultStatus::ErrorGbaTitle:
             return ResultStatus::ErrorLoader_ErrorGbaTitle;
+        case Loader::ResultStatus::ErrorArtic:
+            return ResultStatus::ErrorArticDisconnected;
         default:
             return ResultStatus::ErrorLoader;
         }
@@ -439,8 +457,6 @@ System::ResultStatus System::Init(Frontend::EmuWindow& emu_window,
     dsp_core->SetSink(Settings::values.output_type.GetValue(),
                       Settings::values.output_device.GetValue());
     dsp_core->EnableStretching(Settings::values.enable_audio_stretching.GetValue());
-
-    telemetry_session = std::make_unique<Core::TelemetrySession>();
 
 #ifdef ENABLE_SCRIPTING
     rpc_server = std::make_unique<RPC::Server>(*this);
@@ -566,16 +582,6 @@ void System::RegisterImageInterface(std::shared_ptr<Frontend::ImageInterface> im
 }
 
 void System::Shutdown(bool is_deserializing) {
-    // Log last frame performance stats
-    const auto perf_results = GetAndResetPerfStats();
-    constexpr auto performance = Common::Telemetry::FieldType::Performance;
-
-    telemetry_session->AddField(performance, "Shutdown_EmulationSpeed",
-                                perf_results.emulation_speed * 100.0);
-    telemetry_session->AddField(performance, "Shutdown_Framerate", perf_results.game_fps);
-    telemetry_session->AddField(performance, "Shutdown_Frametime", perf_results.frametime * 1000.0);
-    telemetry_session->AddField(performance, "Mean_Frametime_MS",
-                                perf_stats ? perf_stats->GetMeanFrametime() : 0);
 
     // Shutdown emulation session
     is_powered_on = false;
@@ -587,7 +593,6 @@ void System::Shutdown(bool is_deserializing) {
         app_loader.reset();
     }
     custom_tex_manager.reset();
-    telemetry_session.reset();
 #ifdef ENABLE_SCRIPTING
     rpc_server.reset();
 #endif
@@ -692,6 +697,10 @@ void System::ApplySettings() {
         plg_ldr->SetEnabled(Settings::values.plugin_loader_enabled.GetValue());
         plg_ldr->SetAllowGameChangeState(Settings::values.allow_plugin_loader.GetValue());
     }
+}
+
+void System::RegisterAppLoaderEarly(std::unique_ptr<Loader::AppLoader>& loader) {
+    early_app_loader = std::move(loader);
 }
 
 template <class Archive>

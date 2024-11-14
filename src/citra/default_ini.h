@@ -319,6 +319,10 @@ init_ticks_type =
 # Defaults to 0.
 init_ticks_override =
 
+# Number of steps per hour reported by the pedometer. Range from 0 to 65,535.
+# Defaults to 0.
+steps_per_hour =
+
 [Camera]
 # Which camera engine to use for the right outer camera
 # blank (default): a dummy camera that always returns black image
@@ -361,9 +365,6 @@ renderer_debug =
 # To LLE a service module add "LLE\<module name>=true"
 
 [WebService]
-# Whether or not to enable telemetry
-# 0 (default): No, 1: Yes
-enable_telemetry =
 # URL for Web API
 web_api_url = https://api.citra-emu.org
 # Username and token for Citra Web Service

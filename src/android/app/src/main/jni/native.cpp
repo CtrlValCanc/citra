@@ -38,7 +38,6 @@
 #include "core/hle/service/nfc/nfc.h"
 #include "core/loader/loader.h"
 #include "core/savestate.h"
-#include "core/telemetry_session.h"
 #include "jni/android_common/android_common.h"
 #include "jni/applets/mii_selector.h"
 #include "jni/applets/swkbd.h"
@@ -83,6 +82,7 @@ static jobject ToJavaCoreError(Core::System::ResultStatus result) {
     static const std::map<Core::System::ResultStatus, const char*> CoreErrorNameMap{
         {Core::System::ResultStatus::ErrorSystemFiles, "ErrorSystemFiles"},
         {Core::System::ResultStatus::ErrorSavestate, "ErrorSavestate"},
+        {Core::System::ResultStatus::ErrorArticDisconnected, "ErrorArticDisconnected"},
         {Core::System::ResultStatus::ErrorUnknown, "ErrorUnknown"},
     };
 
@@ -179,6 +179,7 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
     auto app_loader = Loader::GetLoader(filepath);
     if (app_loader) {
         app_loader->ReadProgramId(program_id);
+        system.RegisterAppLoaderEarly(app_loader);
         GameSettings::LoadOverrides(program_id);
     }
     system.ApplySettings();
@@ -207,9 +208,6 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
         return load_result;
     }
 
-    auto& telemetry_session = system.TelemetrySession();
-    telemetry_session.AddField(Common::Telemetry::FieldType::App, "Frontend", "Android");
-
     stop_run = false;
     pause_emulation = false;
 
@@ -235,6 +233,10 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
                 InputManager::NDKMotionHandler()->DisableSensors();
                 if (!HandleCoreError(result, system.GetStatusDetails())) {
                     // Frontend requests us to abort
+                    // If the error was an Artic disconnect, return shutdown request.
+                    if (result == Core::System::ResultStatus::ErrorArticDisconnected) {
+                        return Core::System::ResultStatus::ShutdownRequested;
+                    }
                     return result;
                 }
                 InputManager::NDKMotionHandler()->EnableSensors();
@@ -292,12 +294,13 @@ void Java_org_citra_citra_1emu_NativeLibrary_surfaceChanged(JNIEnv* env,
                                                             jobject surf) {
     s_surf = ANativeWindow_fromSurface(env, surf);
 
+    bool notify = false;
     if (window) {
-        window->OnSurfaceChanged(s_surf);
+        notify = window->OnSurfaceChanged(s_surf);
     }
 
     auto& system = Core::System::GetInstance();
-    if (system.IsPoweredOn()) {
+    if (notify && system.IsPoweredOn()) {
         system.GPU().Renderer().NotifySurfaceChanged();
     }
 
@@ -306,10 +309,12 @@ void Java_org_citra_citra_1emu_NativeLibrary_surfaceChanged(JNIEnv* env,
 
 void Java_org_citra_citra_1emu_NativeLibrary_surfaceDestroyed([[maybe_unused]] JNIEnv* env,
                                                               [[maybe_unused]] jobject obj) {
-    ANativeWindow_release(s_surf);
-    s_surf = nullptr;
-    if (window) {
-        window->OnSurfaceChanged(s_surf);
+    if (s_surf != nullptr) {
+        ANativeWindow_release(s_surf);
+        s_surf = nullptr;
+        if (window) {
+            window->OnSurfaceChanged(s_surf);
+        }
     }
 }
 
@@ -318,7 +323,9 @@ void Java_org_citra_citra_1emu_NativeLibrary_doFrame([[maybe_unused]] JNIEnv* en
     if (stop_run || pause_emulation) {
         return;
     }
-    window->TryPresenting();
+    if (window) {
+        window->TryPresenting();
+    }
 }
 
 void JNICALL Java_org_citra_citra_1emu_NativeLibrary_initializeGpuDriver(

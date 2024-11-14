@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <memory>
 #include <SPIRV/GlslangToSpv.h>
 #include <glslang/Include/ResourceLimits.h>
 #include <glslang/Public/ShaderLang.h>
@@ -158,7 +159,8 @@ bool InitializeCompiler() {
 }
 } // Anonymous namespace
 
-vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, vk::Device device) {
+vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, vk::Device device,
+                         std::string_view premable) {
     if (!InitializeCompiler()) {
         return {};
     }
@@ -176,12 +178,14 @@ vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, v
     shader->setEnvTarget(glslang::EShTargetSpv,
                          glslang::EShTargetLanguageVersion::EShTargetSpv_1_3);
     shader->setStringsWithLengths(&pass_source_code, &pass_source_code_length, 1);
+    shader->setPreamble(premable.data());
 
     glslang::TShader::ForbidIncluder includer;
     if (!shader->parse(&DefaultTBuiltInResource, default_version, profile, false, true, messages,
                        includer)) [[unlikely]] {
         LOG_INFO(Render_Vulkan, "Shader Info Log:\n{}\n{}", shader->getInfoLog(),
                  shader->getInfoDebugLog());
+        LOG_INFO(Render_Vulkan, "Shader Source:\n{}", code);
         return {};
     }
 

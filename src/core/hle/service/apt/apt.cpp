@@ -34,7 +34,6 @@
 #include "core/hw/aes/ccm.h"
 #include "core/hw/aes/key.h"
 #include "core/loader/loader.h"
-#include "core/telemetry_session.h"
 
 SERVICE_CONSTRUCT_IMPL(Service::APT::Module)
 
@@ -218,7 +217,7 @@ bool Module::LoadSharedFont() {
     const FileSys::Path file_path(std::vector<u8>(20, 0));
     FileSys::Mode open_mode = {};
     open_mode.read_flag.Assign(1);
-    auto file_result = archive.OpenFile(file_path, open_mode);
+    auto file_result = archive.OpenFile(file_path, open_mode, 0);
     if (file_result.Failed())
         return false;
 
@@ -273,10 +272,6 @@ bool Module::LoadLegacySharedFont() {
 void Module::APTInterface::GetSharedFont(Kernel::HLERequestContext& ctx) {
     IPC::RequestParser rp(ctx);
     IPC::RequestBuilder rb = rp.MakeBuilder(2, 2);
-
-    // Log in telemetry if the game uses the shared font
-    apt->system.TelemetrySession().AddField(Common::Telemetry::FieldType::Session,
-                                            "RequiresSharedFont", true);
 
     if (!apt->shared_font_loaded) {
         // On real 3DS, font loading happens on booting. However, we load it on demand to coordinate
